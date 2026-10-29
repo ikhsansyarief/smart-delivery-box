@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoxGuard Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{--bg:#f4f4f0;--card:#fff;--text:#1c1c1c;--mute:#6b6b6b;--line:#dcdcd6;
+--ok:#1b7f4b;--okbg:#dff3e7;--safe:#1f5fa8;--safebg:#dce9f7;--warn:#b45f06;--warnbg:#fdebd0;--bad:#b3261e;--badbg:#fadbd8}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--card:#1f1f1f;--text:#eee;--mute:#999;--line:#333;
+--ok:#6fd49b;--okbg:#17321f;--safe:#7fb2ee;--safebg:#172a40;--warn:#f0a850;--warnbg:#3d2a10;--bad:#ff8a80;--badbg:#431a17}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+h1{font-size:20px;margin:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin-bottom:6px}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;border:1px solid var(--line)}
+.on{background:var(--okbg);color:var(--ok);border-color:transparent}
+.off{background:var(--badbg);color:var(--bad);border-color:transparent}
+#status{font-size:34px;font-weight:700;display:inline-block;padding:6px 18px;border-radius:8px}
+.s-SECURE{background:var(--okbg);color:var(--ok)}.s-SAFE{background:var(--safebg);color:var(--safe)}
+.s-TAMPER_ALERT{background:var(--warnbg);color:var(--warn);animation:pulse 1s infinite}
+.s-ILLEGAL_OPEN{background:var(--badbg);color:var(--bad);animation:pulse .6s infinite}
+.s-WAIT{background:var(--line);color:var(--mute)}
+@keyframes pulse{50%{opacity:.55}}
+button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--mute)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.k{color:var(--mute);font-size:12px}.v{font-size:20px;font-weight:600}
+canvas{width:100%;height:200px;display:block}
+ul{list-style:none;margin:0;padding:0;max-height:180px;overflow:auto;font-size:13px}
+li{padding:4px 0;border-bottom:1px solid var(--line)}
+input{font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);width:100%}
+details label{display:block;margin-top:8px;font-size:12px;color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<header><h1>BoxGuard · Smart Delivery Box</h1><span id="conn" class="pill off">Terputus</span></header>
+
+<div class="card">
+  <div class="label">Status keamanan kotak</div>
+  <span id="status" class="s-WAIT">MENUNGGU</span>
+  <div id="reason" style="margin-top:8px;color:var(--mute)">Belum ada data dari detector.</div>
+  <div class="row">
+    <span id="armed" class="pill">ARM: -</span>
+    <button id="btnArm">ARM</button>
+    <button id="btnDisarm">DISARM</button>
+    <button id="btnTest">Tes alarm</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Edge 1 · Kotak paket</div>
+  <div class="grid">
+    <div><div class="k">Tutup</div><div class="v" id="lid">-</div></div>
+    <div><div class="k">Getaran RMS (m/s²)</div><div class="v" id="rms">-</div></div>
+    <div><div class="k">Cahaya (lux)</div><div class="v" id="lux">-</div></div>
+    <div><div class="k">Proximity (cm)</div><div class="v" id="prox">-</div></div>
+    <div><div class="k">Pesan #</div><div class="v" id="seq">-</div></div>
+    <div><div class="k">Terakhir</div><div class="v" id="age">-</div></div>
+  </div>
+  <div class="row"><span id="boxOnline" class="pill off">Kotak offline</span>
+  <span id="ownerOnline" class="pill off">Pemilik offline</span></div>
+</div>
+
+<div class="card">
+  <div class="label">Getaran (motion RMS) · 60 pesan terakhir · garis merah bawah = tutup terbuka</div>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="card"><div class="label">Log alert</div><ul id="log"></ul></div>
+
+<div class="card"><details id="settings"><summary>Koneksi broker</summary>
+  <label>PROJECT_ID</label><input id="pid">
+  <label>MQTT WebSocket URL</label><input id="wsurl" value="wss://broker.hivemq.com:8884/mqtt">
+  <label>Token kontrol (jika CONTROL_TOKEN di .env diisi)</label><input id="token" type="password">
+  <div class="row"><button id="btnConnect">Sambungkan</button></div>
+</details></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let cfg = {project_id:"", ws_url:"wss://broker.hivemq.com:8884/mqtt", box_id:"box1", threshold:0.7};
+let client = null, base = "", hist = [], lastTeleAt = null;
+const MAXH = 60;
+
+function setConn(ok){ $("conn").textContent = ok ? "Terhubung" : "Terputus"; $("conn").className = "pill " + (ok ? "on" : "off"); }
+function setPill(el, ok, onTxt, offTxt){ el.textContent = ok ? onTxt : offTxt; el.className = "pill " + (ok ? "on" : "off"); }
+
+function connect(){
+  if (client) client.end(true);
+  const pid = $("pid").value.trim(), url = $("wsurl").value.trim();
+  if (!pid) { $("settings").open = true; return; }
+  base = `deliverybox/${pid}`;
+  hist = [];
+  client = mqtt.connect(url, {clientId: "dash-" + Math.random().toString(16).slice(2, 8), reconnectPeriod: 2000});
+  client.on("connect", () => {
+    setConn(true);
+    client.subscribe([`${base}/edge/${cfg.box_id}/telemetry`, `${base}/status`, `${base}/alerts`], {qos: 1});
+  });
+  client.on("close", () => setConn(false));
+  client.on("message", (topic, payload) => {
+    let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+    if (topic.endsWith("/telemetry")) onTele(d);
+    else if (topic.endsWith("/status")) onStatus(d);
+    else if (topic.endsWith("/alerts")) onAlert(d);
+  });
+}
+
+function onTele(d){
+  lastTeleAt = Date.now();
+  hist.push({rms: d.motion_rms, open: !!d.lid_open});
+  if (hist.length > MAXH) hist.shift();
+  $("lid").textContent = d.lid_open ? "TERBUKA" : "Tertutup";
+  $("lid").style.color = d.lid_open ? "var(--bad)" : "var(--ok)";
+  $("rms").textContent = d.motion_rms.toFixed(2);
+  $("lux").textContent = d.lux == null ? "-" : d.lux.toFixed(1);
+  $("prox").textContent = d.proximity_cm == null ? "-" : d.proximity_cm.toFixed(1);
+  $("seq").textContent = d.sequence;
+  draw();
+}
+
+function onStatus(d){
+  $("status").textContent = d.status;
+  $("status").className = "s-" + d.status;
+  $("reason").textContent = d.reason;
+  setPill($("armed"), d.armed, "ARM: aktif", "ARM: nonaktif");
+  setPill($("boxOnline"), d.box_online, "Kotak online", "Kotak offline");
+  setPill($("ownerOnline"), d.owner_online, "Pemilik online", "Pemilik offline");
+  if (d.threshold) cfg.threshold = d.threshold;
+}
+
+function onAlert(d){
+  const li = document.createElement("li");
+  li.textContent = `${new Date(d.sent_at_ms).toLocaleTimeString()} · ${d.status}${d.repeat ? " (ulang)" : ""} · ${d.reason}`;
+  $("log").prepend(li);
+  while ($("log").children.length > 30) $("log").lastChild.remove();
+}
+
+function send(cmd){
+  if (!client || !client.connected) return;
+  client.publish(`${base}/control`, JSON.stringify({command: cmd, token: $("token").value}), {qos: 1});
+}
+
+function draw(){
+  const c = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  c.width = w * dpr; c.height = h * dpr;
+  const g = c.getContext("2d"); g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const line = css.getPropertyValue("--line"), mute = css.getPropertyValue("--mute");
+  const safe = css.getPropertyValue("--safe"), bad = css.getPropertyValue("--bad");
+  const pad = {l: 34, r: 8, t: 8, b: 16};
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const ymax = Math.max(2, cfg.threshold * 1.6, ...hist.map(p => p.rms * 1.15));
+  const X = i => pad.l + (hist.length < 2 ? 0 : i * pw / (MAXH - 1));
+  const Y = v => pad.t + ph - (v / ymax) * ph;
+  g.font = "11px system-ui"; g.fillStyle = mute; g.strokeStyle = line; g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const v = ymax * i / 4, y = Y(v);
+    g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+    g.fillText(v.toFixed(1), 2, y + 4);
+  }
+  g.setLineDash([5, 4]); g.strokeStyle = bad; g.beginPath();
+  g.moveTo(pad.l, Y(cfg.threshold)); g.lineTo(w - pad.r, Y(cfg.threshold)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = bad; hist.forEach((p, i) => { if (p.open) g.fillRect(X(i) - 3, h - 8, 6, 5); });
+  g.strokeStyle = safe; g.lineWidth = 2; g.beginPath();
+  hist.forEach((p, i) => i ? g.lineTo(X(i), Y(p.rms)) : g.moveTo(X(i), Y(p.rms)));
+  g.stroke();
+}
+
+setInterval(() => {
+  $("age").textContent = lastTeleAt ? Math.round((Date.now() - lastTeleAt) / 1000) + " dtk lalu" : "-";
+}, 1000);
+window.addEventListener("resize", draw);
+$("btnConnect").onclick = connect;
+$("btnArm").onclick = () => send("ARM");
+$("btnDisarm").onclick = () => send("DISARM");
+$("btnTest").onclick = () => send("TEST_ALARM");
+
+(async () => {
+  try { const r = await fetch("config.json", {cache: "no-store"}); if (r.ok) cfg = {...cfg, ...await r.json()}; } catch {}
+  $("pid").value = cfg.project_id; $("wsurl").value = cfg.ws_url;
+  draw();
+  if (cfg.project_id) connect(); else $("settings").open = true;
+})();
+</script>
+</body>
+</html>
