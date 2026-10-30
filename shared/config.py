@@ -1,4 +1,4 @@
-"""Konfigurasi dari .env (pola sama dengan contoh-project-iot1)."""
+"""Konfigurasi dari .env"""
 import os
 import re
 from dataclasses import dataclass
