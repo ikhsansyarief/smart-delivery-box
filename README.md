@@ -12,18 +12,17 @@ Edge 1 (HP di kotak) → MQTT/TLS HiveMQ → Detector (laptop) → Edge 2 (HP pe
 
 ## Setup
 ```
-pkg install python git termux-api        # di Termux (kedua HP)
+pkg install python git termux-api        
 pip install -r requirements.txt
-cp .env.example .env                     # lalu ganti PROJECT_ID (harus sama di semua perangkat)
+cp .env.example .env                   
 ```
 
-## Jalankan (urutan)
+## Jalankan 
 ```
-python detector.py        # laptop → buka http://localhost:8000 (atau IP LAN yang tercetak)
+python detector.py        # laptop → buka http://localhost:8000 
 python owner_node.py      # HP pemilik
-python box_node.py        # HP kotak (letakkan layar menghadap tutup, TUTUP dulu baru jalankan)
+python box_node.py        # HP kotak 
 ```
-Tanpa HP: `python box_node.py --source simulator --scenario demo`
 (skenario: still | shake | open | demo).
 
 ## Logika status
@@ -35,10 +34,3 @@ Tanpa HP: `python box_node.py --source simulator --scenario demo`
 | ARM, tutup terbuka | ILLEGAL_OPEN (latch sampai DISARM/ARM) |
 
 Alur penggunaan: kurir menaruh paket → tutup → ARM. Pemilik mengambil paket → DISARM → tutup → ARM lagi.
-
-## Kalibrasi
-Lihat nilai `lux` di log `box_node.py` saat tutup tertutup dan terbuka, lalu sesuaikan
-`LIGHT_OPEN_LUX` / `LIGHT_CLOSE_LUX` dan `MOTION_RMS_THRESHOLD` di `.env`.
-
-## Tes
-`python -m unittest discover tests`
