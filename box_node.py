@@ -1,8 +1,6 @@
 """Edge 1: HP di dalam/menempel pada kotak paket.
 Sensor: accelerometer + light/proximity -> olah (Motion RMS, status tutup) -> publish MQTT.
 
-  python box_node.py                      # otomatis: Termux bila ada, kalau tidak simulator
-  python box_node.py --source simulator --scenario demo
 """
 import argparse
 import json
