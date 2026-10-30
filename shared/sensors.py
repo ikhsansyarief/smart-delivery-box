@@ -1,4 +1,4 @@
-"""Pembacaan sensor: Termux:API (HP asli) atau simulator (laptop)."""
+"""Pembacaan sensor: Termux:API"""
 import json
 import random
 import shutil
